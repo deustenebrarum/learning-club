@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from django.conf.urls.static import static
 import app.settings as settings
-import main.urls as main_urls
+import apiv1.urls as main_urls
 
 urlpatterns = [
     path('admin/', admin.site.urls),

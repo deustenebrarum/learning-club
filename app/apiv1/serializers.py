@@ -1,53 +1,129 @@
-from tokenize import Comment
 from rest_framework import serializers
-from .models import Application, Post, Tag, Topic
-from rest_framework.serializers import CurrentUserDefault
+from django.contrib.auth.models import Group
+from .models import (
+    User, UserRole, Course, CourseMaterial,
+    Homework, HomeworkSubmission, AttendanceRecord,
+)
 
 
-class TagSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Tag
-        fields = ('id', 'title')
-
-
-class TopicSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Topic
-        fields = ('id', 'title', 'description')
-
-
-class PostSerializer(serializers.ModelSerializer):
-    user = serializers.HiddenField(default=CurrentUserDefault())
-    tags = serializers.SerializerMethodField('get_tags')
-    
-    def get_tags(self, obj):
-        return TagSerializer(obj.tags.all(), many=True).data
+class UserSerializer(serializers.ModelSerializer):
+    role = serializers.SerializerMethodField()
+    group = serializers.StringRelatedField()
 
     class Meta:
-        model = Post
-        fields = (
-            'id', 'user_id', 'user', 'tags', 'title', 'content', 'topic_id',
-            'created_at', 'updated_at'
-        )
-        read_only_fields = ('user_id', 'created_at', 'updated_at')
+        model = User
+        fields = [
+            'id', 'username', 'email', 'first_name',
+            'last_name', 'role', 'group', 'is_active'
+        ]
+        extra_kwargs = {
+            'password': {'write_only': True}
+        }
+
+    def get_role(self, obj):
+        if obj.is_admin:
+            return UserRole.ADMIN
+        if obj.is_teacher:
+            return UserRole.TEACHER
+        return UserRole.STUDENT
+
+    def create(self, validated_data):
+        user = super().create(validated_data)
+        user.set_password(validated_data['password'])
+        user.save()
+        return user
 
 
-class ApplicationSerializer(serializers.ModelSerializer):
+class CourseSerializer(serializers.ModelSerializer):
+    instructor_name = serializers.CharField(
+        source='instructor.get_full_name', read_only=True)
+
     class Meta:
-        model = Application
-        fields = ('id', 'application_type', 'application_file')
+        model = Course
+        fields = ['id', 'title', 'instructor', 'instructor_name']
+        extra_kwargs = {
+            'instructor': {'write_only': True}
+        }
+
+    def validate_instructor(self, value):
+        if not value.is_teacher:
+            raise serializers.ValidationError("Instructor must be a teacher")
+        return value
 
 
-class CommentSerializer(serializers.ModelSerializer):
-    user = serializers.HiddenField(default=CurrentUserDefault())
+class CourseMaterialSerializer(serializers.ModelSerializer):
+    uploaded_by = serializers.HiddenField(
+        default=serializers.CurrentUserDefault())
 
     class Meta:
-        model = Comment
-        fields = (
-            'id', 'user_id', 'user', 'post_id',
-            'content', 'created_at', 'updated_at'
-        )
-        read_only_fields = ('user_id', 'created_at', 'updated_at')
+        model = CourseMaterial
+        fields = '__all__'
+        read_only_fields = ['uploaded_by']
 
-    def user_id(self, obj):
-        return obj.user.id
+    def validate(self, data):
+        user = self.context['request'].user
+        if not user.is_teacher:
+            raise serializers.ValidationError(
+                "Only teachers can upload materials")
+        return data
+
+
+class HomeworkSerializer(serializers.ModelSerializer):
+    assigned_by = serializers.HiddenField(
+        default=serializers.CurrentUserDefault())
+
+    class Meta:
+        model = Homework
+        fields = '__all__'
+        read_only_fields = ['assigned_by']
+
+    def validate_assigned_by(self, value):
+        if not value.is_teacher:
+            raise serializers.ValidationError(
+                "Only teachers can assign homework")
+        return value
+
+
+class HomeworkSubmissionSerializer(serializers.ModelSerializer):
+    student = serializers.HiddenField(default=serializers.CurrentUserDefault())
+
+    class Meta:
+        model = HomeworkSubmission
+        fields = '__all__'
+        read_only_fields = ['submitted_at', 'grade']
+
+    def validate_student(self, value):
+        if not value.is_student:
+            raise serializers.ValidationError(
+                "Only students can submit homework")
+        return value
+
+
+class AttendanceRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AttendanceRecord
+        fields = '__all__'
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get('request', None)
+
+        if request and request.user.is_student:
+            fields['grade'].read_only = True
+        return fields
+
+
+class AdminUserSerializer(UserSerializer):
+    class Meta(UserSerializer.Meta):
+        fields = UserSerializer.Meta.fields + ['date_joined', 'last_login']
+
+
+class TeacherCourseMaterialSerializer(CourseMaterialSerializer):
+    class Meta(CourseMaterialSerializer.Meta):
+        fields = '__all__'
+        read_only_fields = ['course', 'uploaded_by']
+
+
+class StudentHomeworkSubmissionSerializer(HomeworkSubmissionSerializer):
+    class Meta(HomeworkSubmissionSerializer.Meta):
+        exclude = ['grade']

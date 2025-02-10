@@ -1,3 +1,4 @@
+from datetime import timedelta
 from pathlib import Path
 import os
 
@@ -132,16 +133,16 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.',
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.LimitOffsetPagination',
+    'PAGE_SIZE': 1000,
 }
 
 DJOSER = {
-    'LOGIN_FIELD': 'email',
-    'USER_CREATE_PASSWORD_RETYPE': True,
-    'SERIALIZERS': {
-        'user_create': 'apiv1.serializers.UserCreateSerializer',
-        'user': 'apiv1.serializers.UserSerializer',
-    }
+    'LOGIN_FIELD': 'username',
+    'USER_CREATE_PASSWORD_RETYPE': False,
+    'PERMISSIONS': {
+        'user_create': ['rest_framework.permissions.IsAdminUser'],
+    },
 }
 
 SIMPLE_JWT = {
@@ -150,4 +151,4 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-AUTH_USER_MODEL = 'apiv1.User'
+# AUTH_USER_MODEL = 'apiv1.User'

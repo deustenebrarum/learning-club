@@ -1,49 +1,152 @@
-from .models import Application, Post, Tag, Topic, Comment
-from .serializers import (
-    ApplicationSerializer, CommentSerializer, PostSerializer,
-    TagSerializer, TopicSerializer
-)
-from rest_framework.views import Response
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import (
-    DjangoModelPermissionsOrAnonReadOnly,
-    IsAuthenticatedOrReadOnly
-)
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter, SearchFilter
+# views.py
+from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
+from .models import *
+from .serializers import *
 
-class TagViewSet(ModelViewSet):
-    serializer_class = TagSerializer
-    queryset = Tag.objects.all()
-    permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
+class UserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAdminUser]
 
+    def get_serializer_class(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return AdminUserSerializer
+        return super().get_serializer_class()
 
-class TopicViewSet(ModelViewSet):
-    serializer_class = TopicSerializer
-    queryset = Topic.objects.all()
-    permission_classes = [DjangoModelPermissionsOrAnonReadOnly]
+    def get_queryset(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return User.objects.all()
+        if isinstance(user, User) and user.is_teacher:
+            return User.objects.filter(groups__name=UserRole.STUDENT)
+        return User.objects.none()
 
+class CourseViewSet(viewsets.ModelViewSet):
+    serializer_class = CourseSerializer
+    permission_classes = [permissions.DjangoModelPermissionsOrAnonReadOnly]
 
-class PostViewSet(ModelViewSet):
-    serializer_class = PostSerializer
-    queryset = Post.objects.all()
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    filter_backends = [DjangoFilterBackend, OrderingFilter, SearchFilter]
-    filterset_fields = ['topic_id']
-    search_fields = ['title', 'content', 'tags__title', 'topic__title']
-    ordering_fields = ['created_at', 'updated_at']
+    def get_queryset(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return Course.objects.all()
+        if isinstance(user, User) and user.is_teacher:
+            return Course.objects.filter(instructor=user)
+        if isinstance(user, User) and user.is_student:
+            return Course.objects.filter(studentsgroup__user=user)
+        return Course.objects.none()
 
+    def perform_create(self, serializer):
+        user = self.request.user
+        if isinstance(user, User) and user.is_teacher:
+            serializer.save(instructor=user)
+        else:
+            super().perform_create(serializer)
 
-class ApplicationViewSet(ModelViewSet):
-    serializer_class = ApplicationSerializer
-    queryset = Application.objects.all()
-    permission_classes = [IsAuthenticatedOrReadOnly]
+class CourseMaterialViewSet(viewsets.ModelViewSet):
+    serializer_class = CourseMaterialSerializer
+    permission_classes = [permissions.DjangoModelPermissions]
 
+    def get_serializer_class(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_teacher:
+            return TeacherCourseMaterialSerializer
+        return super().get_serializer_class()
 
-class CommentViewSet(ModelViewSet):
-    serializer_class = CommentSerializer
-    queryset = Comment.objects.all()
-    permission_classes = [IsAuthenticatedOrReadOnly]
-    filter_backends = [DjangoFilterBackend, OrderingFilter]
-    filterset_fields = ['post_id']
-    ordering_fields = ['created_at', 'updated_at']
+    def get_queryset(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return CourseMaterial.objects.all()
+        if isinstance(user, User) and user.is_teacher:
+            return CourseMaterial.objects.filter(uploaded_by=user)
+        if isinstance(user, User) and user.is_student:
+            return CourseMaterial.objects.filter(course__studentsgroup__user=user)
+        return CourseMaterial.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if isinstance(user, User):
+            serializer.save(uploaded_by=user)
+
+class HomeworkViewSet(viewsets.ModelViewSet):
+    serializer_class = HomeworkSerializer
+    permission_classes = [permissions.DjangoModelPermissions]
+
+    def get_queryset(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return Homework.objects.all()
+        if isinstance(user, User) and user.is_teacher:
+            return Homework.objects.filter(assigned_by=user)
+        if isinstance(user, User) and user.is_student:
+            return Homework.objects.filter(course__studentsgroup__user=user)
+        return Homework.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if isinstance(user, User):
+            serializer.save(assigned_by=user)
+
+class HomeworkSubmissionViewSet(viewsets.ModelViewSet):
+    serializer_class = HomeworkSubmissionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_student:
+            return StudentHomeworkSubmissionSerializer
+        return super().get_serializer_class()
+
+    def get_queryset(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return HomeworkSubmission.objects.all()
+        if isinstance(user, User) and user.is_teacher:
+            return HomeworkSubmission.objects.filter(
+                homework__course__instructor=user
+            )
+        if isinstance(user, User) and user.is_student:
+            return HomeworkSubmission.objects.filter(student=user)
+        return HomeworkSubmission.objects.none()
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    def set_grade(self, request, pk=None):
+        submission = self.get_object()
+        grade = request.data.get('grade')
+        
+        if grade is None or not (0 <= int(grade) <= 100):
+            return Response(
+                {'error': 'Invalid grade value'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        submission.grade = grade
+        submission.save()
+        return Response({'status': 'grade set'})
+
+class AttendanceRecordViewSet(viewsets.ModelViewSet):
+    serializer_class = AttendanceRecordSerializer
+    permission_classes = [permissions.DjangoModelPermissions]
+
+    def get_queryset(self):
+        user = self.request.user
+        if isinstance(user, User) and user.is_admin:
+            return AttendanceRecord.objects.all()
+        if isinstance(user, User) and user.is_teacher:
+            return AttendanceRecord.objects.filter(
+                student__group__course__instructor=user
+            )
+        if isinstance(user, User) and user.is_student:
+            return AttendanceRecord.objects.filter(student=user)
+        return AttendanceRecord.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if isinstance(user, User) and user.is_teacher:
+            serializer.save()
+        else:
+            raise permissions.exceptions.PermissionDenied()
+

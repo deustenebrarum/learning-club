@@ -1,15 +1,19 @@
 from rest_framework.routers import DefaultRouter
-from .views import ApplicationViewSet, CommentViewSet, PostViewSet, TagViewSet, TopicViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.urls import path
+from .views import (
+    UserViewSet, CourseViewSet, CourseMaterialViewSet,
+    HomeworkViewSet, HomeworkSubmissionViewSet, AttendanceRecordViewSet,
+)
 
 router = DefaultRouter()
+router.register(r'users', UserViewSet)
+router.register(r'courses', CourseViewSet)
+router.register(r'materials', CourseMaterialViewSet)
+router.register(r'homeworks', HomeworkViewSet)
+router.register(r'submissions', HomeworkSubmissionViewSet)
+router.register(r'attendance', AttendanceRecordViewSet)
 
-router.register(r'tags', TagViewSet, basename='tag')
-router.register(r'topics', TopicViewSet, basename='topic')
-router.register(r'posts', PostViewSet, basename='post')
-router.register(r'comments', CommentViewSet, basename='comment')
-router.register(r'applications', ApplicationViewSet, basename='application')
 
 urlpatterns = router.urls + [
     path('auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
